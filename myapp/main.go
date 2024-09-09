@@ -17,11 +17,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	serverManager := NewServersManager(login.NewServer())
 
-	err := serverManager.Run()
-	if err != nil {
-		panic(err)
-	}
-
+	serverManager.Run()
 	<-quit
 	serverManager.Close()
 
@@ -37,14 +33,15 @@ func NewServersManager(servers ...Server) *ServersManger {
 	}
 }
 
-func (sm *ServersManger) Run() error {
+func (sm *ServersManger) Run() {
 	for _, server := range sm.servers {
-		err := server.Run()
-		if err != nil {
-			return err
-		}
+		go func() {
+			err := server.Run()
+			if err != nil {
+				panic(err)
+			}
+		}()
 	}
-	return nil
 }
 
 func (sm *ServersManger) Close() {

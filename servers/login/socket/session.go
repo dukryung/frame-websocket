@@ -11,11 +11,11 @@ import (
 
 type SessionService struct {
 	Upgrader *websocket.Upgrader
-	Clients  map[string]*Client
+	Sessions map[string]*Session
 	mu       sync.Mutex
 }
 
-type Client struct {
+type Session struct {
 	SessionId string `json:"session-id"`
 	Conn      *websocket.Conn
 	Data      map[string]interface{}
@@ -24,11 +24,14 @@ type Client struct {
 func NewSessionService() *SessionService {
 	return &SessionService{
 		Upgrader: &websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
 			CheckOrigin: func(r *http.Request) bool {
-				// This allows any origin, modify this for production to restrict origins
-				return true
+				return true // Allows connections from all origins
 			},
 		},
+		Sessions: make(map[string]*Session),
+		mu:       sync.Mutex{},
 	}
 }
 
@@ -38,58 +41,55 @@ func (ss *SessionService) CreateSession(c *gin.Context) {
 		fmt.Println(err)
 	}
 
-	defer conn.Close()
-
-	//TODO : 회원 정보 체크 로직
-
 	sessionId := c.Query("session-id")
 	if sessionId == "" {
 		sessionId = "test"
 	}
 
-	client := &Client{
+	session := &Session{
 		SessionId: sessionId,
 		Conn:      conn,
 		Data:      make(map[string]interface{}),
 	}
 
-	ss.AddClient(client)
+	ss.AddSession(session)
 
-	go handleMessage(client)
+	go ss.HandleMessage(session)
 
 }
 
-func (ss *SessionService) AddClient(client *Client) {
+func (ss *SessionService) AddSession(session *Session) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
-	ss.Clients[client.SessionId] = client
-	log.Printf("Client %s connected", client.SessionId)
+	ss.Sessions[session.SessionId] = session
+	fmt.Printf("Client %s connected\n", session.SessionId)
 
 }
 
-// RemoveClient removes a client from the session manager
-func (ss *SessionService) RemoveClient(clientID string) {
+// RemoveSession removes a client from the session manager
+func (ss *SessionService) RemoveSession(sessionID string) {
 	ss.mu.Lock()
 	defer ss.mu.Unlock()
 
-	delete(ss.Clients, clientID)
-	fmt.Printf("Client %s disconnected\n", clientID)
+	delete(ss.Sessions, sessionID)
+	fmt.Printf("Client %s disconnected\n", sessionID)
 }
-func handleMessage(client *Client) {
+func (ss *SessionService) HandleMessage(session *Session) {
+	defer ss.RemoveSession(session.SessionId)
+	defer session.Conn.Close()
+
 	for {
-		_, msg, err := client.Conn.ReadMessage()
+		_, msg, err := session.Conn.ReadMessage()
 		if err != nil {
-			log.Println(err)
+			fmt.Println("Read Message error", err)
 			return
 		}
 
-		fmt.Printf("Received message from %s: %s\n", client.SessionId, msg)
-
+		fmt.Printf("Received message from %s: %s\n", session.SessionId, msg)
 		// Echo the message back to the client (for testing)
-		if err := client.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
+		if err := session.Conn.WriteMessage(websocket.TextMessage, msg); err != nil {
 			log.Println("Error writing message:", err)
 			break
 		}
 	}
-
 }
